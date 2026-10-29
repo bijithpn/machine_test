@@ -8,12 +8,15 @@ class LocationException implements Exception {
   String toString() => message;
 }
 
+String formatDistance(double meters) =>
+    meters.round() < 1000 ? '${meters.round()} m' : '${(meters / 1000).toStringAsFixed(1)} km';
+
 class OutsideOfficeException implements Exception {
   const OutsideOfficeException(this.distanceMeters, this.limitMeters);
   final double distanceMeters;
   final double limitMeters;
   String get message =>
-      'You are ${distanceMeters.round()} m from the office. Attendance is only allowed within ${limitMeters.round()} m.';
+      'You are ${formatDistance(distanceMeters)} from the office. Attendance is only allowed within ${formatDistance(limitMeters)}.';
   @override
   String toString() => message;
 }
