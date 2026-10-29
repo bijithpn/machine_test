@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:geolocator/geolocator.dart';
@@ -10,9 +11,12 @@ import '../../../core/design/widgets.dart';
 import '../../../core/errors/exceptions.dart';
 import '../../../domain/models.dart';
 import '../../attendance/presentation/attendance_cubit.dart';
+import '../../../data/location/location_override_cubit.dart';
+import 'clear_rejected.dart';
 import 'connectivity_cubit.dart';
 import 'dashboard_cubit.dart';
 import 'elapsed_text.dart';
+import 'location_override_sheet.dart';
 
 class DashboardScreen extends StatelessWidget {
   const DashboardScreen({super.key});
@@ -24,7 +28,19 @@ class DashboardScreen extends StatelessWidget {
     final employee = state.data.employee;
 
     return Scaffold(
-      appBar: AppBar(title: const Text('REBS HRMS')),
+      appBar: AppBar(
+        title: const Text('REBS HRMS'),
+        actions: [
+          if (kDebugMode)
+            IconButton(
+              tooltip: 'Test location',
+              icon: Icon(
+                !context.watch<LocationOverrideCubit>().state.isActive ? Icons.location_searching : Icons.my_location,
+              ),
+              onPressed: () => showLocationOverride(context),
+            ),
+        ],
+      ),
       body: employee == null
           ? (state.refreshing
                 ? const Center(child: CircularProgressIndicator())
@@ -117,6 +133,7 @@ class DashboardBanners extends StatelessWidget {
           icon: Icons.error_outline,
           message:
               '${counts.rejected} ${counts.rejected == 1 ? 'action was' : 'actions were'} rejected by the server. See the Attendance tab.',
+          action: TextButton(onPressed: () => confirmClearRejected(context), child: const Text('Dismiss')),
         ),
     ];
     if (state.refreshing) banners.insert(0, const LinearProgressIndicator(minHeight: 2));
@@ -328,7 +345,7 @@ class AttendanceDayTile extends StatelessWidget {
                   Padding(
                     padding: const EdgeInsets.only(top: 2),
                     child: Text(
-                      day.rejectionReason!,
+                      formatServerMessage(day.rejectionReason!),
                       style: theme.textTheme.bodySmall?.copyWith(color: AppColors.danger),
                     ),
                   ),

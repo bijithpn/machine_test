@@ -22,8 +22,6 @@ class SyncService {
   final CompanyClock _clock;
   Future<SyncReport>? _running;
 
-  /// Joins an in-flight run instead of starting a second one, so an event is
-  /// never submitted by two runs at once. [manual] ignores backoff.
   Future<SyncReport> sync({bool manual = false}) => _running ??= _run(manual).whenComplete(() => _running = null);
 
   static Duration backoff(int attempts) => Duration(seconds: math.min(300, 2 << math.min(attempts, 8)));
@@ -42,8 +40,18 @@ class SyncService {
         case EventAccepted():
           await _store.markSynced(event.id);
           sent++;
-        case EventRejected(:final reason):
-          await _store.markRejected(event.id, reason);
+        case EventRejected(:final reason, :final code):
+          if (code == 'INVALID_ORDER' && await _store.hasLiveCheckIn(event.workDate)) {
+            await _store.markAttemptFailed(
+              event.id,
+              error: 'Waiting for the check-in to reach the server',
+              uncertain: false,
+              nextAttemptAt: _clock.nowUtc().add(backoff(event.attempts + 1)),
+            );
+            blocked = true;
+          } else {
+            await _store.markRejected(event.id, reason, code: code);
+          }
         case EventTransientFailure(:final message, :final uncertain):
           await _store.markAttemptFailed(
             event.id,
@@ -51,7 +59,6 @@ class SyncService {
             uncertain: uncertain,
             nextAttemptAt: _clock.nowUtc().add(backoff(event.attempts + 1)),
           );
-          // Later events depend on this one (check-in before check-out), so stop.
           blocked = true;
       }
       if (blocked) break;

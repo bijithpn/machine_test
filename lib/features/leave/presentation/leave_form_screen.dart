@@ -9,6 +9,7 @@ import '../../../core/design/widgets.dart';
 import '../../../core/errors/exceptions.dart';
 import '../../../domain/leave_rules.dart';
 import '../../../domain/models.dart';
+import '../../../data/repositories/leave_repository.dart';
 import 'leave_cubit.dart';
 import 'leave_form_cubit.dart';
 
@@ -75,34 +76,42 @@ class _LeaveFormScreenState extends State<LeaveFormScreen> {
     final ok = await confirmDialog(
       context,
       title: 'Submit leave request?',
-      message: 'This sends your request for approval and needs a connection.',
+      message:
+          'Your request is sent for approval. If the server is unreachable it is saved here and sent automatically.',
       confirmLabel: 'Submit',
     );
     if (!ok || !mounted) return;
 
     setState(() => _submitting = true);
     try {
-      await context.read<LeaveCubit>().submit(_draft);
+      final result = await context.read<LeaveCubit>().submit(_draft);
       _saved.reset();
       if (!mounted) return;
-      showToast(context, 'Leave request submitted', kind: ToastKind.success);
+      showToast(
+        context,
+        result == LeaveSubmitResult.sent
+            ? 'Leave request submitted'
+            : 'Saved on this device. It will be sent when the server is reachable.',
+        kind: result == LeaveSubmitResult.sent ? ToastKind.success : ToastKind.info,
+      );
       Navigator.of(context).pop();
     } on LeaveValidationException catch (e) {
       const known = {'type', 'startDate', 'endDate', 'reason'};
       final fields = {
         for (final f in e.fieldErrors.entries)
-          if (known.contains(f.key)) f.key: f.value,
+          if (known.contains(f.key)) f.key: formatServerMessage(f.value),
       };
       setState(() {
         _serverErrors = fields;
-        _formError = fields.isEmpty || e.fieldErrors.length > fields.length ? e.message ?? e.toString() : e.message;
+        final message = fields.isEmpty || e.fieldErrors.length > fields.length ? e.message ?? e.toString() : e.message;
+        _formError = message == null ? null : formatServerMessage(message);
       });
     } on OfflineException catch (e) {
       setState(() => _formError = e.message);
-      errorDialog(context, title: 'You are offline', message: e.message);
+      errorDialog(context, title: 'Leave details not loaded', message: e.message);
     } on ApiException catch (e) {
-      setState(() => _formError = e.message);
-      showToast(context, e.message, kind: ToastKind.error);
+      setState(() => _formError = formatServerMessage(e.message));
+      showToast(context, formatServerMessage(e.message), kind: ToastKind.error);
     } finally {
       if (mounted) setState(() => _submitting = false);
     }
@@ -113,15 +122,15 @@ class _LeaveFormScreenState extends State<LeaveFormScreen> {
     return LeaveRules.validate(
       draft: _draft,
       today: context.read<CompanyClock>().todayDate,
-      balance: snapshot.balance ?? 0,
-      existing: snapshot.requests,
+      balance: snapshot.available ?? 0,
+      existing: snapshot.blocking,
     );
   }
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final balance = context.watch<LeaveCubit>().state.data.balance ?? 0;
+    final balance = context.watch<LeaveCubit>().state.data.available ?? 0;
     final errors = {..._serverErrors, if (_attempted) ..._localErrors()};
     final days = _start != null && _end != null && !_end!.isBefore(_start!)
         ? LeaveRules.dayCount(_start!, _end!)

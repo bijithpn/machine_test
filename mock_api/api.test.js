@@ -1,16 +1,17 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createApp } from './app.js';
+import { createApp, defaultConfig } from './app.js';
 
-const OFFICE = { latitude: 12.9716, longitude: 77.5946 };
+const OFFICE = { latitude: defaultConfig.officeLat, longitude: defaultConfig.officeLng };
 
-async function start(now = () => new Date('2026-10-28T04:00:00Z')) {
+async function start(now = () => new Date("2026-10-28T04:00:00Z")) {
   const app = createApp({ now });
   await new Promise((r) => app.server.listen(0, r));
   const base = `http://127.0.0.1:${app.server.address().port}`;
   const call = async (method, path, body, headers = {}) => {
     const res = await fetch(base + path, {
-      method, headers: { 'content-type': 'application/json', ...headers },
+      method,
+      headers: { "content-type": "application/json", ...headers },
       body: body === undefined ? undefined : JSON.stringify(body),
     });
     return { status: res.status, body: await res.json() };
@@ -24,7 +25,9 @@ const event = (id, type, extra = {}) => ({
 
 test('core read endpoints return seeded data', async () => {
   const { call, close } = await start();
-  assert.equal((await call('GET', '/employee/me')).body.id, 'EMP-1042');
+  const me = (await call('GET', '/employee/me')).body;
+  assert.equal(me.id, 'EMP-1042');
+  assert.deepEqual(me.office, { latitude: OFFICE.latitude, longitude: OFFICE.longitude, radiusMeters: 200 });
   assert.equal((await call('GET', '/leave/balance')).body.available, 12);
   assert.ok((await call('GET', '/leave/requests')).body.requests.length >= 3);
   const att = await call('GET', '/attendance?month=2026-10');
@@ -67,8 +70,9 @@ test('validation and geofence errors are reported', async () => {
   const { call, close } = await start();
   const bad = await call('POST', '/attendance/events', { eventId: 'x' });
   assert.equal(bad.status, 422);
-  const far = await call('POST', '/attendance/events', event('evt-aaaa-0004', 'check_in', { latitude: 13.5 }));
+  const far = await call('POST', '/attendance/events', event('evt-aaaa-0004', 'check_in', { latitude: OFFICE.latitude + 0.5284 }));
   assert.equal(far.body.code, 'OUTSIDE_GEOFENCE');
+  assert.match(far.body.message, /you were 58\.8 km from the office\. Attendance must be within 200 m/);
   close();
 });
 
@@ -119,4 +123,55 @@ test('dev controls are disabled in production mode', async () => {
   const res = await fetch(`http://127.0.0.1:${app.server.address().port}/__mock/state`);
   assert.equal(res.status, 404);
   app.server.close();
+});
+
+test("dev office control moves the geofence", async () => {
+  const { call, close } = await start();
+  const far = { latitude: OFFICE.latitude + 0.5284, longitude: OFFICE.longitude };
+  assert.equal(
+    (
+      await call(
+        "POST",
+        "/attendance/events",
+        event("evt-aaaa-0020", "check_in", far),
+      )
+    ).body.code,
+    "OUTSIDE_GEOFENCE",
+  );
+  assert.equal((await call("POST", "/__mock/office", far)).status, 200);
+  assert.equal(
+    (
+      await call(
+        "POST",
+        "/attendance/events",
+        event("evt-aaaa-0021", "check_in", far),
+      )
+    ).status,
+    200,
+  );
+  assert.equal(
+    (await call("POST", "/__mock/office", { latitude: "x" })).status,
+    400,
+  );
+  close();
+});
+
+test('invalid-order outcomes are not cached, so a retry after the check-in succeeds', async () => {
+  const { call, close } = await start();
+  const out = await call('POST', '/attendance/events', event('evt-aaaa-0030', 'check_out'));
+  assert.equal(out.body.code, 'INVALID_ORDER');
+  assert.equal((await call('POST', '/attendance/events', event('evt-aaaa-0031', 'check_in'))).status, 200);
+  assert.equal((await call('POST', '/attendance/events', event('evt-aaaa-0030', 'check_out'))).status, 200);
+  close();
+});
+
+test('leave requests are idempotent on requestId', async () => {
+  const { call, close } = await start();
+  const body = { requestId: 'req-1', type: 'casual', startDate: '2026-12-10', endDate: '2026-12-11', reason: 'Family function' };
+  const first = await call('POST', '/leave/requests', body);
+  const again = await call('POST', '/leave/requests', body);
+  assert.equal(first.status, 201);
+  assert.equal(again.body.id, first.body.id);
+  assert.equal((await call('GET', '/leave/balance')).body.available, 10);
+  close();
 });

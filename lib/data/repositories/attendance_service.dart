@@ -17,6 +17,8 @@ class AttendanceService {
     required this.officeLatitude,
     required this.officeLongitude,
     this.radiusMeters = AppConfig.officeRadiusMeters,
+    this.officeOverride,
+    this.serverOffice,
   });
 
   final AttendanceStore _store;
@@ -26,6 +28,8 @@ class AttendanceService {
   final double officeLatitude;
   final double officeLongitude;
   final double radiusMeters;
+  final LocationFix? Function()? officeOverride;
+  final Future<Office?> Function()? serverOffice;
   final _uuid = const Uuid();
   Future<void> _tail = Future.value();
 
@@ -40,8 +44,16 @@ class AttendanceService {
     AttendanceRules.ensureAllowed(type, await _store.day(date));
 
     final fix = await _location.currentFix();
-    final distance = AttendanceRules.distanceMeters(fix.latitude, fix.longitude, officeLatitude, officeLongitude);
-    if (distance > radiusMeters) throw OutsideOfficeException(distance, radiusMeters);
+    final server = await serverOffice?.call();
+    final override = officeOverride?.call();
+    final limit = server?.radiusMeters ?? radiusMeters;
+    final distance = AttendanceRules.distanceMeters(
+      fix.latitude,
+      fix.longitude,
+      override?.latitude ?? server?.latitude ?? officeLatitude,
+      override?.longitude ?? server?.longitude ?? officeLongitude,
+    );
+    if (distance > limit) throw OutsideOfficeException(distance, limit);
 
     final now = _clock.nowUtc();
     final event = AttendanceEvent(

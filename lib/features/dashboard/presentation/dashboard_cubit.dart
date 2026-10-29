@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter_bloc/flutter_bloc.dart';
 
+import '../../../core/design/formatters.dart';
 import '../../../core/errors/exceptions.dart';
 import '../../../data/remote/hrms_api.dart';
 import '../../../data/repositories/workspace_repository.dart';
@@ -42,10 +43,11 @@ class DashboardCubit extends Cubit<DashboardState> {
     String? error;
     var offline = false;
     try {
-      await _sync.sync(manual: manualSync);
       await _repo.refresh();
+      final report = await _sync.sync(manual: true);
+      if (report.sent > 0) await _repo.refresh();
     } on ApiException catch (e) {
-      error = e.message;
+      error = formatServerMessage(e.message);
       offline = HrmsApi.isConnectivityFailure(e);
     } finally {
       _refreshes--;
@@ -73,12 +75,13 @@ class DashboardCubit extends Cubit<DashboardState> {
   }
 
   Future<void> backgroundSync() async {
-    if (state.data.counts.pending == 0) return;
-    final report = await _sync.sync();
-    if (report.sent > 0) {
-      await refresh();
-    } else {
-      await _publish(error: state.error, offline: state.offline);
-    }
+    if (state.refreshing) return;
+    if (state.offline || state.error != null || state.data.counts.pending > 0) await refresh();
+  }
+
+  Future<int> clearRejected() async {
+    final removed = await _repo.clearRejected();
+    await _publish(error: state.error, offline: state.offline);
+    return removed;
   }
 }

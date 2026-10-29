@@ -1,5 +1,6 @@
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:dio/dio.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/widgets.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:hydrated_bloc/hydrated_bloc.dart';
@@ -13,6 +14,8 @@ import 'core/time/company_clock.dart';
 import 'data/local/app_database.dart';
 import 'data/local/attendance_store.dart';
 import 'data/local/cache_store.dart';
+import 'data/local/leave_outbox_store.dart';
+import 'data/location/location_override_cubit.dart';
 import 'data/location/location_service.dart';
 import 'data/remote/hrms_api.dart';
 import 'data/repositories/attendance_service.dart';
@@ -48,20 +51,27 @@ Future<void> main() async {
   final cache = CacheStore(db);
   final attendance = AttendanceStore(db);
   final sync = SyncService(attendance, api, clock);
+  final workspace = WorkspaceRepository(api, cache, attendance, clock);
   final connectivity = Connectivity();
 
   runApp(
     MultiRepositoryProvider(
       providers: [
+        RepositoryProvider.value(value: api),
         RepositoryProvider.value(value: clock),
+        BlocProvider(create: (_) => LocationOverrideCubit()),
         RepositoryProvider(
-          create: (_) => AttendanceService(
+          create: (c) => AttendanceService(
             attendance,
-            createLocationService(),
+            kDebugMode
+                ? OverridableLocationService(createLocationService(), c.read<LocationOverrideCubit>())
+                : createLocationService(),
             clock,
             employeeId: AppConfig.employeeId,
             officeLatitude: AppConfig.officeLatitude,
             officeLongitude: AppConfig.officeLongitude,
+            serverOffice: workspace.cachedOffice,
+            officeOverride: kDebugMode ? () => c.read<LocationOverrideCubit>().state.office : null,
           ),
         ),
       ],
@@ -73,10 +83,10 @@ Future<void> main() async {
               initial: _online(const [ConnectivityResult.other]),
             ),
           ),
-          BlocProvider(create: (_) => DashboardCubit(WorkspaceRepository(api, cache, attendance, clock), sync)),
+          BlocProvider(create: (_) => DashboardCubit(workspace, sync)),
           BlocProvider(create: (c) => AttendanceActionCubit(c.read<AttendanceService>(), c.read<DashboardCubit>())),
           BlocProvider(create: (_) => LeaveFormCubit()),
-          BlocProvider(create: (_) => LeaveCubit(LeaveRepository(api, cache, clock))),
+          BlocProvider(create: (_) => LeaveCubit(LeaveRepository(api, cache, LeaveOutboxStore(db), clock))),
         ],
         child: const RebsApp(),
       ),

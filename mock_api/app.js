@@ -3,12 +3,23 @@ import http from 'node:http';
 const EMPLOYEE = { id: 'EMP-1042', name: 'Priya Nair', department: 'Product Engineering' };
 
 export const defaultConfig = {
-  timezone: process.env.COMPANY_TZ ?? 'Asia/Kolkata',
+  timezone: process.env.COMPANY_TZ ?? "Asia/Kolkata",
   officeLat: Number(process.env.OFFICE_LAT ?? 12.9716),
   officeLng: Number(process.env.OFFICE_LNG ?? 77.5946),
   radiusMeters: Number(process.env.OFFICE_RADIUS_M ?? 200),
-  devControls: process.env.NODE_ENV !== 'production',
+  devControls: process.env.NODE_ENV !== "production",
 };
+
+const formatDistance = (m) =>
+  Math.round(m) < 1000 ? `${Math.round(m)} m` : `${(m / 1000).toFixed(1)} km`;
+
+const prettyDate = (s) =>
+  new Intl.DateTimeFormat("en-GB", {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+    timeZone: "UTC",
+  }).format(new Date(`${s}T00:00:00Z`));
 
 const pad = (n) => String(n).padStart(2, '0');
 
@@ -67,7 +78,14 @@ function seed(now, cfg) {
     { id: 'LV-2', type: 'sick', startDate: addDays(today, 14), endDate: addDays(today, 15), reason: 'Scheduled dental procedure', status: 'pending' },
     { id: 'LV-3', type: 'casual', startDate: addDays(today, -60), endDate: addDays(today, -60), reason: 'Personal errand, declined due to release', status: 'rejected' },
   ].map((r) => ({ ...r, days: dayCount(r.startDate, r.endDate) }));
-  return { attendance, events: new Map(), leave, balance: 12, scenarios: [] };
+  return {
+    attendance,
+    events: new Map(),
+    leave,
+    balance: 12,
+    scenarios: [],
+    leaveByRequestId: new Map(),
+  };
 }
 
 export function createApp({ now = () => new Date(), config = {} } = {}) {
@@ -112,16 +130,35 @@ export function createApp({ now = () => new Date(), config = {} } = {}) {
     if (ts.getTime() > now().getTime() + 5 * 60000) return reject(422, 'INVALID_TIMESTAMP', 'Event timestamp is in the future');
     const dist = distanceMeters(body.latitude, body.longitude, cfg.officeLat, cfg.officeLng);
     if (dist > cfg.radiusMeters) {
-      return reject(422, 'OUTSIDE_GEOFENCE', `Recorded location was ${Math.round(dist)} m from the office (limit ${cfg.radiusMeters} m)`);
+      return reject(
+        422,
+        "OUTSIDE_GEOFENCE",
+        `Outside the office area: you were ${formatDistance(dist)} from the office. Attendance must be within ${formatDistance(cfg.radiusMeters)}.`,
+      );
     }
     const date = companyDate(ts, cfg.timezone);
     const day = state.attendance.get(date);
     if (body.type === 'check_in') {
-      if (day) return reject(409, 'DUPLICATE_ATTENDANCE', `Attendance already recorded for ${date}`);
+      if (day)
+        return reject(
+          409,
+          "DUPLICATE_ATTENDANCE",
+          `You already checked in on ${prettyDate(date)}.`,
+        );
       state.attendance.set(date, { checkIn: ts.toISOString(), checkOut: null });
     } else {
-      if (!day) return reject(409, 'INVALID_ORDER', `Check-out without a check-in on ${date}`);
-      if (day.checkOut) return reject(409, 'DUPLICATE_ATTENDANCE', `Already checked out on ${date}`);
+      if (!day)
+        return reject(
+          409,
+          "INVALID_ORDER",
+          `You need to check in on ${prettyDate(date)} before checking out.`,
+        );
+      if (day.checkOut)
+        return reject(
+          409,
+          "DUPLICATE_ATTENDANCE",
+          `You already checked out on ${prettyDate(date)}.`,
+        );
       day.checkOut = ts.toISOString();
     }
     return { code: 200, body: { status: 'accepted', eventId: body.eventId, replayed: false } };
@@ -139,17 +176,21 @@ export function createApp({ now = () => new Date(), config = {} } = {}) {
     if (forced) {
       const code = forced.name === 'duplicate' ? 'DUPLICATE_ATTENDANCE' : 'INVALID_ORDER';
       const out = { code: 409, body: { status: 'rejected', code, message: `Simulated ${code}` } };
-      state.events.set(body.eventId, out);
+      if (code !== "INVALID_ORDER") state.events.set(body.eventId, out);
       return send(res, out.code, out.body);
     }
     const out = processEvent(body);
-    state.events.set(body.eventId, out);
+    if (out.body.code !== "INVALID_ORDER") state.events.set(body.eventId, out);
     const late = takeScenario('timeout_after_accept');
     if (late) await sleep(late.delayMs);
     send(res, out.code, out.body);
   }
 
   function postLeave(body, res) {
+    const replay =
+      typeof body.requestId === "string" &&
+      state.leaveByRequestId.get(body.requestId);
+    if (replay) return send(res, 201, replay);
     if (takeScenario('leave_reject')) {
       return send(res, 422, {
         message: 'Request rejected by server policy',
@@ -179,6 +220,8 @@ export function createApp({ now = () => new Date(), config = {} } = {}) {
     };
     state.balance -= request.days;
     state.leave.push(request);
+    if (typeof body.requestId === "string")
+      state.leaveByRequestId.set(body.requestId, request);
     send(res, 201, request);
   }
 
@@ -206,6 +249,21 @@ export function createApp({ now = () => new Date(), config = {} } = {}) {
           return send(res, r.error ? 400 : 200, r);
         }
         if (route === 'DELETE /__mock/scenario') { state.scenarios = []; return send(res, 200, { ok: true }); }
+        if (route === "POST /__mock/office") {
+          const { latitude, longitude } = await readJson(req);
+          if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
+            return send(res, 400, {
+              message: "latitude and longitude must be numbers",
+            });
+          }
+          cfg.officeLat = latitude;
+          cfg.officeLng = longitude;
+          return send(res, 200, {
+            ok: true,
+            officeLat: latitude,
+            officeLng: longitude,
+          });
+        }
         if (route === 'POST /__mock/reset') { state = seed(now(), cfg); return send(res, 200, { ok: true }); }
         if (route === 'GET /__mock/state') {
           return send(res, 200, { scenarios: state.scenarios, events: state.events.size, balance: state.balance });
@@ -217,7 +275,16 @@ export function createApp({ now = () => new Date(), config = {} } = {}) {
       if (slow) await sleep(slow.delayMs);
       if (takeScenario('server_error')) return send(res, 500, { message: 'Simulated internal server error' });
 
-      if (route === 'GET /employee/me') return send(res, 200, EMPLOYEE);
+      if (route === "GET /employee/me") {
+        return send(res, 200, {
+          ...EMPLOYEE,
+          office: {
+            latitude: cfg.officeLat,
+            longitude: cfg.officeLng,
+            radiusMeters: cfg.radiusMeters,
+          },
+        });
+      }
       if (route === 'GET /attendance') {
         const month = url.searchParams.get('month');
         if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(month ?? '')) return send(res, 400, { message: 'month must be YYYY-MM' });

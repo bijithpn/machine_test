@@ -8,6 +8,7 @@ import '../features/attendance/presentation/attendance_screen.dart';
 import '../features/dashboard/presentation/connectivity_cubit.dart';
 import '../features/dashboard/presentation/dashboard_cubit.dart';
 import '../features/dashboard/presentation/dashboard_screen.dart';
+import '../features/leave/presentation/leave_cubit.dart';
 import '../features/leave/presentation/leave_screen.dart';
 
 class RebsApp extends StatelessWidget {
@@ -33,7 +34,10 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    _retryTimer = Timer.periodic(const Duration(seconds: 20), (_) => context.read<DashboardCubit>().backgroundSync());
+    _retryTimer = Timer.periodic(const Duration(seconds: 20), (_) {
+      context.read<DashboardCubit>().backgroundSync();
+      context.read<LeaveCubit>().backgroundSync();
+    });
   }
 
   @override
@@ -45,14 +49,19 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.resumed) context.read<DashboardCubit>().refresh();
+    if (state != AppLifecycleState.resumed) return;
+    context.read<DashboardCubit>().refresh();
+    context.read<LeaveCubit>().refresh();
   }
 
   @override
   Widget build(BuildContext context) {
     return BlocListener<ConnectivityCubit, bool>(
       listenWhen: (prev, next) => !prev && next,
-      listener: (context, _) => context.read<DashboardCubit>().refresh(manualSync: true),
+      listener: (context, _) {
+        context.read<DashboardCubit>().refresh(manualSync: true);
+        context.read<LeaveCubit>().refresh();
+      },
       child: Scaffold(
         body: IndexedStack(index: _index, children: const [DashboardScreen(), AttendanceScreen(), LeaveScreen()]),
         bottomNavigationBar: NavigationBar(

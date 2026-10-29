@@ -1,5 +1,6 @@
 import 'package:flutter_bloc/flutter_bloc.dart';
 
+import '../../../core/design/formatters.dart';
 import '../../../core/errors/exceptions.dart';
 import '../../../data/remote/hrms_api.dart';
 import '../../../data/repositories/leave_repository.dart';
@@ -35,14 +36,33 @@ class LeaveCubit extends Cubit<LeaveState> {
     } on ApiException catch (e) {
       final cached = await _repo.cached();
       if (!isClosed) {
-        emit(LeaveState(data: cached, refreshing: false, error: e.message, offline: HrmsApi.isConnectivityFailure(e)));
+        emit(
+          LeaveState(
+            data: cached,
+            refreshing: false,
+            error: formatServerMessage(e.message),
+            offline: HrmsApi.isConnectivityFailure(e),
+          ),
+        );
       }
     }
   }
 
-  Future<void> submit(LeaveDraft draft) async {
-    await _repo.submit(draft);
+  Future<LeaveSubmitResult> submit(LeaveDraft draft) async {
+    final result = await _repo.submit(draft);
     final cached = await _repo.cached();
-    if (!isClosed) emit(LeaveState(data: cached, refreshing: false));
+    if (!isClosed) emit(LeaveState(data: cached, refreshing: false, error: state.error, offline: state.offline));
+    return result;
+  }
+
+  Future<void> dismiss(String id) async {
+    await _repo.dismiss(id);
+    final cached = await _repo.cached();
+    if (!isClosed) emit(LeaveState(data: cached, refreshing: false, error: state.error, offline: state.offline));
+  }
+
+  Future<void> backgroundSync() async {
+    if (state.refreshing) return;
+    if (state.offline || state.error != null || state.data.pendingQueued > 0) await refresh();
   }
 }

@@ -13,15 +13,34 @@ enum SyncStatus { pending, synced, rejected }
 
 enum AttendanceStatus { notCheckedIn, checkedIn, checkedOut }
 
+class Office {
+  const Office({required this.latitude, required this.longitude, required this.radiusMeters});
+  final double latitude;
+  final double longitude;
+  final double radiusMeters;
+
+  factory Office.fromJson(Map<String, dynamic> j) => Office(
+    latitude: (j['latitude'] as num).toDouble(),
+    longitude: (j['longitude'] as num).toDouble(),
+    radiusMeters: (j['radiusMeters'] as num).toDouble(),
+  );
+  Map<String, dynamic> toJson() => {'latitude': latitude, 'longitude': longitude, 'radiusMeters': radiusMeters};
+}
+
 class Employee {
-  const Employee({required this.id, required this.name, required this.department});
+  const Employee({required this.id, required this.name, required this.department, this.office});
   final String id;
   final String name;
   final String department;
+  final Office? office;
 
-  factory Employee.fromJson(Map<String, dynamic> j) =>
-      Employee(id: j['id'] as String, name: j['name'] as String, department: j['department'] as String);
-  Map<String, dynamic> toJson() => {'id': id, 'name': name, 'department': department};
+  factory Employee.fromJson(Map<String, dynamic> j) => Employee(
+    id: j['id'] as String,
+    name: j['name'] as String,
+    department: j['department'] as String,
+    office: j['office'] == null ? null : Office.fromJson(j['office'] as Map<String, dynamic>),
+  );
+  Map<String, dynamic> toJson() => {'id': id, 'name': name, 'department': department, 'office': office?.toJson()};
 }
 
 class AttendanceEvent {
@@ -38,6 +57,7 @@ class AttendanceEvent {
     this.lastError,
     this.uncertain = false,
     this.nextAttemptAt,
+    this.rejectCode,
   });
 
   final String id;
@@ -53,6 +73,7 @@ class AttendanceEvent {
 
   final bool uncertain;
   final DateTime? nextAttemptAt;
+  final String? rejectCode;
 
   String get idempotencyKey => id;
 }
@@ -86,6 +107,32 @@ class SyncCounts {
   final int pending;
   final int synced;
   final int rejected;
+}
+
+class QueuedLeave {
+  const QueuedLeave({
+    required this.id,
+    required this.draft,
+    required this.status,
+    required this.createdAt,
+    this.lastError,
+  });
+  final String id;
+  final LeaveDraft draft;
+  final SyncStatus status;
+  final DateTime createdAt;
+  final String? lastError;
+
+  int get days => draft.end!.difference(draft.start!).inDays + 1;
+
+  LeaveRequest asRequest() => LeaveRequest(
+    id: id,
+    type: draft.type,
+    start: draft.start!,
+    end: draft.end!,
+    reason: draft.reason,
+    status: LeaveStatus.pending,
+  );
 }
 
 enum LeaveType { casual, sick }

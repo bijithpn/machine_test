@@ -2,6 +2,7 @@ import 'package:dio/dio.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rebs_hrms/core/errors/exceptions.dart';
 import 'package:rebs_hrms/data/local/cache_store.dart';
+import 'package:rebs_hrms/data/local/leave_outbox_store.dart';
 import 'package:rebs_hrms/data/remote/hrms_api.dart';
 import 'package:rebs_hrms/data/repositories/leave_repository.dart';
 import 'package:rebs_hrms/domain/leave_rules.dart';
@@ -84,7 +85,7 @@ void main() {
       });
       final db = await openTestDb();
       final api = HrmsApi(Dio(BaseOptions(baseUrl: 'http://test'))..httpClientAdapter = adapter);
-      repo = LeaveRepository(api, CacheStore(db), TestClock().clock);
+      repo = LeaveRepository(api, CacheStore(db), LeaveOutboxStore(db), TestClock().clock);
       await repo.refresh();
     });
 
@@ -102,11 +103,61 @@ void main() {
       expect(posts, 0);
     });
 
-    test('submitting while offline raises OfflineException and keeps cached data', () async {
+    test('submitting while offline queues the request, keeps cached data and reserves the days', () async {
       adapter.handler = (o) => throw DioException.connectionError(requestOptions: o, reason: 'down');
-      await expectLater(repo.submit(draft()), throwsA(isA<OfflineException>()));
+      expect(await repo.submit(draft()), LeaveSubmitResult.queued);
       final cached = await repo.cached();
       expect(cached.balance, 10);
+      expect(cached.queued, hasLength(1));
+      expect(cached.available, 8);
+      await expectLater(
+        repo.submit(draft()),
+        throwsA(isA<LeaveValidationException>()),
+        reason: 'overlaps the queued one',
+      );
+    });
+
+    test('a queued request is sent once with the same request id when the server returns', () async {
+      adapter.handler = (o) => throw DioException.connectionError(requestOptions: o, reason: 'down');
+      await repo.submit(draft());
+      final ids = <String>[];
+      adapter.handler = (o) {
+        if (o.method == 'POST') {
+          ids.add((o.data as Map)['requestId'] as String);
+          return jsonBody(201, {
+            'id': 'LV-9',
+            'type': 'casual',
+            'startDate': '2026-11-02',
+            'endDate': '2026-11-03',
+            'reason': 'Family function this week',
+            'status': 'pending',
+          });
+        }
+        return o.path == '/leave/balance' ? jsonBody(200, {'available': 8}) : jsonBody(200, {'requests': <Object>[]});
+      };
+      final snapshot = await repo.refresh();
+      expect(ids, hasLength(1));
+      expect(snapshot.queued, isEmpty);
+      await repo.refresh();
+      expect(ids, hasLength(1), reason: 'nothing left to send');
+    });
+
+    test('a queued request refused by the server is kept as rejected with its reason', () async {
+      adapter.handler = (o) => throw DioException.connectionError(requestOptions: o, reason: 'down');
+      await repo.submit(draft());
+      adapter.handler = (o) {
+        if (o.method == 'POST') {
+          return jsonBody(422, {
+            'message': 'Leave request is invalid',
+            'errors': {'startDate': 'Leave cannot be taken during the quarterly release freeze'},
+          });
+        }
+        return o.path == '/leave/balance' ? jsonBody(200, {'available': 10}) : jsonBody(200, {'requests': <Object>[]});
+      };
+      final snapshot = await repo.refresh();
+      expect(snapshot.queued.single.status, SyncStatus.rejected);
+      expect(snapshot.queued.single.lastError, contains('freeze'));
+      expect(snapshot.available, 10, reason: 'rejected requests release the days');
     });
 
     test('an overlapping second submission while one is in flight is refused', () async {

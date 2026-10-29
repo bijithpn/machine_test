@@ -1,3 +1,5 @@
+import 'package:hydrated_bloc/hydrated_bloc.dart';
+
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
@@ -80,6 +82,7 @@ class FakeEventServer {
   var dropNextResponseAfterCommit = false;
   var failNext = 0;
   String? rejectNextWith;
+  String? rejectNextCode;
 
   FutureOr<ResponseBody> handle(RequestOptions o) {
     if (o.path != '/attendance/events') return jsonBody(404, {'message': 'nope'});
@@ -95,8 +98,16 @@ class FakeEventServer {
 
     final outcome = rejectNextWith == null
         ? (code: 200, body: <String, dynamic>{'status': 'accepted', 'replayed': false})
-        : (code: 409, body: <String, dynamic>{'status': 'rejected', 'message': rejectNextWith});
+        : (
+            code: 409,
+            body: <String, dynamic>{
+              'status': 'rejected',
+              'message': rejectNextWith,
+              if (rejectNextCode != null) 'code': rejectNextCode,
+            },
+          );
     rejectNextWith = null;
+    rejectNextCode = null;
     processed[id] = outcome;
     if (outcome.code == 200) order.add('${data['type']}:$id');
     if (dropNextResponseAfterCommit) {
@@ -122,4 +133,23 @@ class SyncHarness {
     final server = FakeEventServer();
     return SyncHarness._(db ?? await openTestDb(), clock ?? TestClock(), server, FakeAdapter(server.handle));
   }
+}
+
+class MemoryStorage implements Storage {
+  final _data = <String, dynamic>{};
+
+  @override
+  dynamic read(String key) => _data[key];
+
+  @override
+  Future<void> write(String key, dynamic value) async => _data[key] = value;
+
+  @override
+  Future<void> delete(String key) async => _data.remove(key);
+
+  @override
+  Future<void> clear() async => _data.clear();
+
+  @override
+  Future<void> close() async {}
 }

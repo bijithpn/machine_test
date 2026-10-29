@@ -7,6 +7,7 @@ import '../../../core/design/formatters.dart';
 import '../../../core/design/tokens.dart';
 import '../../../core/design/widgets.dart';
 import '../../../domain/models.dart';
+import '../../dashboard/presentation/clear_rejected.dart';
 import '../../dashboard/presentation/dashboard_cubit.dart';
 import '../../dashboard/presentation/dashboard_screen.dart';
 
@@ -107,6 +108,8 @@ class _SyncSummary extends StatelessWidget {
                 : const Icon(Icons.sync, size: 18),
             label: Text(syncing ? 'Syncing…' : 'Sync now'),
           ),
+          if (counts.rejected > 0)
+            TextButton(onPressed: () => confirmClearRejected(context), child: const Text('Clear rejected')),
         ],
       ),
     );
@@ -135,8 +138,9 @@ class _EventTile extends StatelessWidget {
     final theme = Theme.of(context);
     final clock = context.read<CompanyClock>();
     final detail = switch (event.status) {
-      SyncStatus.rejected => event.lastError,
-      SyncStatus.pending when event.lastError != null => '${event.lastError} (attempt ${event.attempts})',
+      SyncStatus.rejected => event.lastError == null ? null : formatServerMessage(event.lastError!),
+      SyncStatus.pending when event.lastError != null =>
+        '${formatServerMessage(event.lastError!)} (attempt ${event.attempts})',
       _ => null,
     };
     return Padding(

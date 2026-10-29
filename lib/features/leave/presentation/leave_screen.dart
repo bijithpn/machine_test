@@ -42,7 +42,7 @@ class LeaveScreen extends StatelessWidget {
                         tone: BannerTone.warning,
                         icon: state.offline ? Icons.cloud_off_outlined : Icons.sync_problem_outlined,
                         message:
-                            '${state.offline ? 'Offline' : state.error}. Showing leave details saved earlier; applying needs a connection.',
+                            '${state.offline ? 'Offline' : state.error}. Showing leave details saved earlier. New requests are saved here and sent when the server is back.',
                       ),
                     ),
                   AppCard(
@@ -54,7 +54,7 @@ class LeaveScreen extends StatelessWidget {
                             children: [
                               Text('AVAILABLE BALANCE', style: Theme.of(context).textTheme.labelMedium),
                               const SizedBox(height: 2),
-                              Text('${state.data.balance} days', style: Theme.of(context).textTheme.titleLarge),
+                              Text('${state.data.available} days', style: Theme.of(context).textTheme.titleLarge),
                             ],
                           ),
                         ),
@@ -70,14 +70,28 @@ class LeaveScreen extends StatelessWidget {
                   ),
                   const SizedBox(height: AppSpacing.lg),
                   const SectionTitle('Requests'),
-                  if (state.data.requests.isEmpty)
+                  if (state.data.queued.isNotEmpty) ...[
+                    AppCard(
+                      padding: EdgeInsets.zero,
+                      child: Column(
+                        children: [
+                          for (var i = 0; i < state.data.queued.length; i++) ...[
+                            if (i > 0) const Divider(),
+                            _QueuedTile(item: state.data.queued[i]),
+                          ],
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: AppSpacing.md),
+                  ],
+                  if (state.data.requests.isEmpty && state.data.queued.isEmpty)
                     const AppCard(
                       child: EmptyState(
                         message: 'You have not applied for leave yet.',
                         icon: Icons.beach_access_outlined,
                       ),
                     )
-                  else
+                  else if (state.data.requests.isNotEmpty)
                     AppCard(
                       padding: EdgeInsets.zero,
                       child: Column(
@@ -131,6 +145,55 @@ class _RequestTile extends StatelessWidget {
           ),
           const SizedBox(width: AppSpacing.sm),
           StatusChip(request.status.name[0].toUpperCase() + request.status.name.substring(1), color),
+        ],
+      ),
+    );
+  }
+}
+
+class _QueuedTile extends StatelessWidget {
+  const _QueuedTile({required this.item});
+  final QueuedLeave item;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final rejected = item.status == SyncStatus.rejected;
+    final range = item.draft.start == item.draft.end
+        ? formatDateOnly(item.draft.start!)
+        : '${formatDateOnly(item.draft.start!)} – ${formatDateOnly(item.draft.end!)}';
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md, vertical: 12),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  '${item.draft.type == LeaveType.casual ? 'Casual' : 'Sick'} · ${item.days} ${item.days == 1 ? 'day' : 'days'}',
+                  style: theme.textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w600),
+                ),
+                Text(range, style: theme.textTheme.bodySmall),
+                Text(item.draft.reason, style: theme.textTheme.bodySmall, maxLines: 2, overflow: TextOverflow.ellipsis),
+                if (item.lastError != null)
+                  Text(
+                    formatServerMessage(item.lastError!),
+                    style: theme.textTheme.bodySmall?.copyWith(color: rejected ? AppColors.danger : AppColors.warning),
+                  ),
+              ],
+            ),
+          ),
+          const SizedBox(width: AppSpacing.sm),
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              StatusChip(syncLabel(item.status), syncColor(item.status)),
+              if (rejected)
+                TextButton(onPressed: () => context.read<LeaveCubit>().dismiss(item.id), child: const Text('Dismiss')),
+            ],
+          ),
         ],
       ),
     );

@@ -1,10 +1,15 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:hydrated_bloc/hydrated_bloc.dart';
+import 'package:rebs_hrms/data/location/location_override_cubit.dart';
 import 'package:rebs_hrms/core/time/company_clock.dart';
 import 'package:rebs_hrms/core/design/theme.dart';
 import 'package:rebs_hrms/data/repositories/workspace_repository.dart';
 import 'package:rebs_hrms/domain/models.dart';
+
+import '../support/fakes.dart';
+
 import 'package:rebs_hrms/features/dashboard/presentation/dashboard_cubit.dart';
 import 'package:rebs_hrms/features/attendance/presentation/attendance_cubit.dart';
 import 'package:rebs_hrms/features/dashboard/presentation/connectivity_cubit.dart';
@@ -34,12 +39,14 @@ Future<FakeDashboardCubit> pump(WidgetTester tester, DashboardState state, {bool
   tester.view.physicalSize = const Size(800, 2400);
   tester.view.devicePixelRatio = 1;
   addTearDown(tester.view.reset);
+  HydratedBloc.storage = MemoryStorage();
   final cubit = FakeDashboardCubit(state);
   await tester.pumpWidget(
     MultiBlocProvider(
       providers: [
         BlocProvider<DashboardCubit>.value(value: cubit),
         BlocProvider<AttendanceActionCubit>(create: (_) => FakeActionCubit()),
+        BlocProvider(create: (_) => LocationOverrideCubit()),
         BlocProvider(create: (_) => ConnectivityCubit(const Stream.empty(), initial: online)),
       ],
       child: RepositoryProvider(

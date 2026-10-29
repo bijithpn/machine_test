@@ -51,6 +51,13 @@ class WorkspaceRepository {
     );
   }
 
+  Future<int> clearRejected() => _attendance.clearRejected();
+
+  Future<Office?> cachedOffice() async {
+    final employee = await _cache.read(_employeeKey);
+    return employee == null ? null : Employee.fromJson(employee.value! as Map<String, dynamic>).office;
+  }
+
   Future<void> refresh() async {
     final now = _clock.nowUtc();
     final today = _clock.todayDate;
@@ -72,7 +79,10 @@ class WorkspaceRepository {
       step(() async => _attendance.replaceMonth(thisMonth, await _api.attendanceMonth(thisMonth))),
       step(() async => _attendance.replaceMonth(prevMonth, await _api.attendanceMonth(prevMonth))),
     ]);
-    if (failure == null) await _cache.write(_updatedKey, null, now);
+    if (failure == null) {
+      await _attendance.requeueMissingOnServer({thisMonth, prevMonth});
+      await _cache.write(_updatedKey, null, now);
+    }
     if (failure != null) throw failure!;
   }
 

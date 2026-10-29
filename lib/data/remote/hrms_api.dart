@@ -12,14 +12,12 @@ class EventAccepted extends SendResult {
   final bool replayed;
 }
 
-/// Definitive refusal; retrying the same event will never succeed.
 class EventRejected extends SendResult {
-  const EventRejected(this.reason);
+  const EventRejected(this.reason, {this.code});
   final String reason;
+  final String? code;
 }
 
-/// Delivery failed in a way that may heal. [uncertain] means the request was
-/// sent and the server may have committed it before the response was lost.
 class EventTransientFailure extends SendResult {
   const EventTransientFailure(this.message, {required this.uncertain});
   final String message;
@@ -78,11 +76,12 @@ class HrmsApi {
     ],
   );
 
-  Future<LeaveRequest> submitLeave(LeaveDraft draft) async {
+  Future<LeaveRequest> submitLeave(LeaveDraft draft, {required String requestId}) async {
     try {
       final res = await _dio.post<dynamic>(
         '/leave/requests',
         data: {
+          'requestId': requestId,
           'type': draft.type.name,
           'startDate': _date(draft.start!),
           'endDate': _date(draft.end!),
@@ -101,6 +100,14 @@ class HrmsApi {
   }
 
   String _date(DateTime d) => d.toIso8601String().substring(0, 10);
+
+  Future<void> setMockOffice(double latitude, double longitude) async {
+    try {
+      await _dio.post<dynamic>('/__mock/office', data: {'latitude': latitude, 'longitude': longitude});
+    } on DioException catch (e) {
+      throw _asException(e);
+    }
+  }
 
   Future<SendResult> sendEvent(AttendanceEvent e) async {
     try {
@@ -136,6 +143,6 @@ class HrmsApi {
     if (code >= 500 || retryable.contains(code)) {
       return EventTransientFailure('Server error ($code)', uncertain: false);
     }
-    return EventRejected(reason);
+    return EventRejected(reason, code: data is Map ? data['code'] as String? : null);
   }
 }

@@ -126,4 +126,49 @@ void main() {
     expect(counts.rejected, 0);
     expect(counts.pending, 2);
   });
+
+  test('events the device thinks are synced but the server lacks are queued again with the same ids', () async {
+    final h = await SyncHarness.create();
+    final (checkIn, checkOut) = await recordDay(h);
+    await h.sync.sync();
+    expect((await h.store.counts()).synced, 2);
+
+    await h.store.replaceMonth('2026-10', const []);
+    expect(await h.store.requeueMissingOnServer({'2026-10'}), 2);
+    expect((await h.store.pendingEvents()).map((e) => e.id), [checkIn.id, checkOut.id]);
+
+    h.server.order.clear();
+    await h.sync.sync();
+    expect((await h.store.counts()).synced, 2);
+    expect(h.server.order, hasLength(0), reason: 'the fake server already knew both ids and replayed them');
+  });
+
+  test('events the server already has are left alone when reconciling', () async {
+    final h = await SyncHarness.create();
+    final (checkIn, checkOut) = await recordDay(h);
+    await h.sync.sync();
+    await h.store.replaceMonth('2026-10', [
+      (date: checkIn.workDate, checkIn: checkIn.timestamp, checkOut: checkOut.timestamp),
+    ]);
+    expect(await h.store.requeueMissingOnServer({'2026-10'}), 0);
+  });
+
+  test(
+    'a check-out refused for ordering while a local check-in exists keeps waiting instead of being rejected',
+    () async {
+      final h = await SyncHarness.create();
+      final service = serviceFor(h);
+      final checkIn = await service.record(AttendanceType.checkIn);
+      await h.store.markSynced(checkIn.id);
+      h.clockHolder.now = h.clockHolder.now.add(const Duration(hours: 8));
+      await service.record(AttendanceType.checkOut);
+
+      h.server.rejectNextWith = 'You need to check in before checking out.';
+      h.server.rejectNextCode = 'INVALID_ORDER';
+      final report = await h.sync.sync();
+      expect(report.counts.rejected, 0);
+      expect(report.counts.pending, 1);
+      expect((await h.store.pendingEvents()).single.lastError, contains('Waiting for the check-in'));
+    },
+  );
 }

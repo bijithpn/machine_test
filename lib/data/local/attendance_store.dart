@@ -21,10 +21,9 @@ class AttendanceStore {
     lastError: r['last_error'] as String?,
     uncertain: (r['uncertain']! as int) == 1,
     nextAttemptAt: r['next_attempt_at'] == null ? null : DateTime.parse(r['next_attempt_at']! as String),
+    rejectCode: r['reject_code'] as String?,
   );
 
-  /// Server history overlaid with local events. Pending and synced events fill
-  /// gaps in the cached day, so a stale refresh can never hide a local action.
   Future<Map<String, AttendanceDay>> _mergedDays(DatabaseExecutor db) async {
     final days = <String, ({DateTime? inAt, DateTime? outAt, SyncStatus sync, String? reason})>{};
     for (final r in await db.query('attendance_days')) {
@@ -35,8 +34,12 @@ class AttendanceStore {
         reason: null,
       );
     }
-    final events = await db.query('attendance_events', orderBy: 'timestamp, rowid');
-    for (final e in events.map(_event)) {
+    final events = (await db.query('attendance_events', orderBy: 'timestamp, rowid')).map(_event).toList();
+    final live = {
+      for (final e in events)
+        if (e.status != SyncStatus.rejected) (e.workDate, e.type),
+    };
+    for (final e in events) {
       final cur = days[e.workDate] ?? (inAt: null, outAt: null, sync: SyncStatus.synced, reason: null);
       var sync = cur.sync;
       var reason = cur.reason;
@@ -44,6 +47,7 @@ class AttendanceStore {
       var outAt = cur.outAt;
       switch (e.status) {
         case SyncStatus.rejected:
+          if (live.contains((e.workDate, e.type))) continue;
           sync = SyncStatus.rejected;
           reason = e.lastError;
         case SyncStatus.pending:
@@ -120,6 +124,9 @@ class AttendanceStore {
     return SyncCounts(pending: n(SyncStatus.pending), synced: n(SyncStatus.synced), rejected: n(SyncStatus.rejected));
   }
 
+  Future<int> clearRejected() =>
+      _db.delete('attendance_events', where: 'status = ?', whereArgs: [SyncStatus.rejected.name]);
+
   Future<void> markSynced(String id) => _db.update(
     'attendance_events',
     {'status': SyncStatus.synced.name, 'last_error': null, 'uncertain': 0, 'next_attempt_at': null},
@@ -127,9 +134,15 @@ class AttendanceStore {
     whereArgs: [id],
   );
 
-  Future<void> markRejected(String id, String reason) => _db.update(
+  Future<void> markRejected(String id, String reason, {String? code}) => _db.update(
     'attendance_events',
-    {'status': SyncStatus.rejected.name, 'last_error': reason, 'uncertain': 0, 'next_attempt_at': null},
+    {
+      'status': SyncStatus.rejected.name,
+      'last_error': reason,
+      'reject_code': code,
+      'uncertain': 0,
+      'next_attempt_at': null,
+    },
     where: 'id = ?',
     whereArgs: [id],
   );
@@ -143,6 +156,55 @@ class AttendanceStore {
     'UPDATE attendance_events SET attempts = attempts + 1, last_error = ?, uncertain = ?, next_attempt_at = ? WHERE id = ?',
     [error, uncertain ? 1 : 0, nextAttemptAt.toUtc().toIso8601String(), id],
   );
+
+  Future<bool> hasLiveCheckIn(String workDate) async => (await _db.query(
+    'attendance_events',
+    where: 'work_date = ? AND type = ? AND status != ?',
+    whereArgs: [workDate, AttendanceType.checkIn.wire, SyncStatus.rejected.name],
+    limit: 1,
+  )).isNotEmpty;
+
+  Future<int> requeueMissingOnServer(Set<String> months) => _db.transaction((txn) async {
+    final serverDays = {for (final r in await txn.query('attendance_days')) r['date']! as String: r};
+    final events = (await txn.query('attendance_events')).map(_event).toList();
+    final live = {
+      for (final e in events)
+        if (e.status != SyncStatus.rejected) (e.workDate, e.type),
+    };
+    var changed = 0;
+    for (final e in events) {
+      if (!months.contains(e.workDate.substring(0, 7))) continue;
+      final column = e.type == AttendanceType.checkIn ? 'check_in' : 'check_out';
+      final onServer = serverDays[e.workDate]?[column] != null;
+      final lost = e.status == SyncStatus.synced && !onServer;
+      final reason = (e.lastError ?? '').toLowerCase();
+      final orderRejected =
+          e.status == SyncStatus.rejected &&
+          e.type == AttendanceType.checkOut &&
+          !onServer &&
+          !live.contains((e.workDate, AttendanceType.checkOut)) &&
+          live.contains((e.workDate, AttendanceType.checkIn)) &&
+          (e.rejectCode == 'INVALID_ORDER' ||
+              reason.contains('check-out without') ||
+              reason.contains('before checking out'));
+      if (!lost && !orderRejected) continue;
+      await txn.update(
+        'attendance_events',
+        {
+          'status': SyncStatus.pending.name,
+          'attempts': 0,
+          'uncertain': 0,
+          'next_attempt_at': null,
+          'reject_code': null,
+          'last_error': 'Not found on the server; sending again',
+        },
+        where: 'id = ?',
+        whereArgs: [e.id],
+      );
+      changed++;
+    }
+    return changed;
+  });
 
   Future<void> replaceMonth(String month, List<({String date, DateTime? checkIn, DateTime? checkOut})> records) =>
       _db.transaction((txn) async {

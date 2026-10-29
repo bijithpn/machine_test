@@ -19,8 +19,8 @@ Future<void> main(List<String> args) async {
     type: AttendanceType.checkIn,
     timestamp: DateTime.now().toUtc(),
     workDate: '',
-    latitude: 12.9716,
-    longitude: 77.5946,
+    latitude: 9.9828967,
+    longitude: 76.28197009,
   );
   await dio.post<void>('/__mock/scenario', data: {'name': 'timeout_after_accept', 'delayMs': 3000});
   final first = await api.sendEvent(event);
@@ -36,8 +36,8 @@ Future<void> main(List<String> args) async {
       type: AttendanceType.checkIn,
       timestamp: DateTime.now().toUtc(),
       workDate: '',
-      latitude: 12.9716,
-      longitude: 77.5946,
+      latitude: 9.9828967,
+      longitude: 76.28197009,
     ),
   );
   print('second check-in new id: ${dup is EventRejected ? 'Rejected: ${dup.reason}' : dup.runtimeType}');
