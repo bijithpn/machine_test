@@ -53,6 +53,7 @@ Future<void> main() async {
   final sync = SyncService(attendance, api, clock);
   final workspace = WorkspaceRepository(api, cache, attendance, clock);
   final connectivity = Connectivity();
+  final startOnline = _online(await connectivity.checkConnectivity());
 
   runApp(
     MultiRepositoryProvider(
@@ -78,10 +79,7 @@ Future<void> main() async {
       child: MultiBlocProvider(
         providers: [
           BlocProvider(
-            create: (_) => ConnectivityCubit(
-              connectivity.onConnectivityChanged.map(_online),
-              initial: _online(const [ConnectivityResult.other]),
-            ),
+            create: (_) => ConnectivityCubit(connectivity.onConnectivityChanged.map(_online), initial: startOnline),
           ),
           BlocProvider(create: (_) => DashboardCubit(workspace, sync)),
           BlocProvider(create: (c) => AttendanceActionCubit(c.read<AttendanceService>(), c.read<DashboardCubit>())),

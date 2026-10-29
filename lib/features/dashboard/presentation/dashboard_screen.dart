@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:geolocator/geolocator.dart';
 
+import '../../../core/config/app_config.dart';
 import '../../../core/time/company_clock.dart';
 import '../../../core/design/feedback.dart';
 import '../../../core/design/formatters.dart';
@@ -41,39 +42,31 @@ class DashboardScreen extends StatelessWidget {
             ),
         ],
       ),
-      body: employee == null
-          ? (state.refreshing
-                ? const Center(child: CircularProgressIndicator())
-                : ErrorState(
-                    message: state.error ?? 'We could not load your profile.',
-                    offline: state.offline || !online,
-                    onRetry: () => context.read<DashboardCubit>().refresh(manualSync: true),
-                  ))
-          : RefreshIndicator(
-              onRefresh: () => context.read<DashboardCubit>().refresh(manualSync: true),
-              child: ListView(
-                physics: const AlwaysScrollableScrollPhysics(),
-                padding: const EdgeInsets.all(AppSpacing.md),
-                children: [
-                  _Header(employee: employee),
-                  const SizedBox(height: AppSpacing.md),
-                  DashboardBanners(state: state, online: online),
-                  _TodayCard(state: state),
-                  const SizedBox(height: AppSpacing.md),
-                  _BalanceCard(balance: state.data.balance),
-                  const SizedBox(height: AppSpacing.lg),
-                  const SectionTitle('Recent attendance'),
-                  _RecentList(days: state.data.recent),
-                ],
-              ),
-            ),
+      body: RefreshIndicator(
+        onRefresh: () => context.read<DashboardCubit>().refresh(manualSync: true),
+        child: ListView(
+          physics: const AlwaysScrollableScrollPhysics(),
+          padding: const EdgeInsets.all(AppSpacing.md),
+          children: [
+            _Header(employee: employee),
+            const SizedBox(height: AppSpacing.md),
+            DashboardBanners(state: state, online: online),
+            _TodayCard(state: state),
+            const SizedBox(height: AppSpacing.md),
+            _BalanceCard(balance: state.data.balance),
+            const SizedBox(height: AppSpacing.lg),
+            const SectionTitle('Recent attendance'),
+            _RecentList(days: state.data.recent),
+          ],
+        ),
+      ),
     );
   }
 }
 
 class _Header extends StatelessWidget {
   const _Header({required this.employee});
-  final Employee employee;
+  final Employee? employee;
 
   @override
   Widget build(BuildContext context) {
@@ -81,9 +74,12 @@ class _Header extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(employee.name, style: theme.textTheme.titleLarge),
+        Text(employee?.name ?? 'Welcome', style: theme.textTheme.titleLarge),
         const SizedBox(height: 2),
-        Text('${employee.id} · ${employee.department}', style: theme.textTheme.bodySmall),
+        Text(
+          employee == null ? AppConfig.employeeId : '${employee!.id} · ${employee!.department}',
+          style: theme.textTheme.bodySmall,
+        ),
         const SizedBox(height: 2),
         Text(formatLongDay(context.read<CompanyClock>().today), style: theme.textTheme.bodySmall),
       ],
@@ -105,7 +101,7 @@ class DashboardBanners extends StatelessWidget {
         const StatusBanner(
           tone: BannerTone.warning,
           icon: Icons.cloud_off_outlined,
-          message: 'Offline. Showing saved data; new attendance is stored on this device.',
+          message: 'Offline. Showing saved data; new attendance is stored on this device and will sync automatically when you are back online.',
         )
       else if (state.error != null)
         StatusBanner(

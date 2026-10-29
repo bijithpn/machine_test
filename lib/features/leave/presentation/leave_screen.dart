@@ -16,96 +16,90 @@ class LeaveScreen extends StatelessWidget {
     final state = context.watch<LeaveCubit>().state;
     return Scaffold(
       appBar: AppBar(title: const Text('Leave')),
-      body: !state.data.hasData
-          ? (state.refreshing
-                ? const Center(child: CircularProgressIndicator())
-                : ErrorState(
-                    message: state.error ?? 'We could not load your leave details.',
-                    offline: state.offline,
-                    onRetry: () => context.read<LeaveCubit>().refresh(),
-                  ))
-          : RefreshIndicator(
-              onRefresh: () => context.read<LeaveCubit>().refresh(),
-              child: ListView(
-                physics: const AlwaysScrollableScrollPhysics(),
-                padding: const EdgeInsets.all(AppSpacing.md),
+      body: RefreshIndicator(
+        onRefresh: () => context.read<LeaveCubit>().refresh(),
+        child: ListView(
+          physics: const AlwaysScrollableScrollPhysics(),
+          padding: const EdgeInsets.all(AppSpacing.md),
+          children: [
+            if (state.refreshing)
+              const Padding(
+                padding: EdgeInsets.only(bottom: AppSpacing.sm),
+                child: LinearProgressIndicator(minHeight: 2),
+              ),
+            if (state.error != null)
+              Padding(
+                padding: const EdgeInsets.only(bottom: AppSpacing.sm),
+                child: StatusBanner(
+                  tone: BannerTone.warning,
+                  icon: state.offline ? Icons.cloud_off_outlined : Icons.sync_problem_outlined,
+                  message:
+                      '${state.offline ? 'Offline' : state.error}. Showing leave details saved earlier. New requests are saved here and sent automatically when you are back online.',
+                ),
+              ),
+            AppCard(
+              child: Row(
                 children: [
-                  if (state.refreshing)
-                    const Padding(
-                      padding: EdgeInsets.only(bottom: AppSpacing.sm),
-                      child: LinearProgressIndicator(minHeight: 2),
-                    ),
-                  if (state.error != null)
-                    Padding(
-                      padding: const EdgeInsets.only(bottom: AppSpacing.sm),
-                      child: StatusBanner(
-                        tone: BannerTone.warning,
-                        icon: state.offline ? Icons.cloud_off_outlined : Icons.sync_problem_outlined,
-                        message:
-                            '${state.offline ? 'Offline' : state.error}. Showing leave details saved earlier. New requests are saved here and sent when the server is back.',
-                      ),
-                    ),
-                  AppCard(
-                    child: Row(
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text('AVAILABLE BALANCE', style: Theme.of(context).textTheme.labelMedium),
-                              const SizedBox(height: 2),
-                              Text('${state.data.available} days', style: Theme.of(context).textTheme.titleLarge),
-                            ],
-                          ),
-                        ),
-                        FilledButton(
-                          onPressed: () =>
-                              Navigator.of(context)
-                                  .push(MaterialPageRoute<void>(builder: (_) => const LeaveFormScreen())),
-                          style: FilledButton.styleFrom(minimumSize: const Size(120, 44)),
-                          child: const Text('Apply'),
+                        Text('AVAILABLE BALANCE', style: Theme.of(context).textTheme.labelMedium),
+                        const SizedBox(height: 2),
+                        Text(
+                          state.data.available == null ? '--' : '${state.data.available} days',
+                          style: Theme.of(context).textTheme.titleLarge,
                         ),
                       ],
                     ),
                   ),
-                  const SizedBox(height: AppSpacing.lg),
-                  const SectionTitle('Requests'),
-                  if (state.data.queued.isNotEmpty) ...[
-                    AppCard(
-                      padding: EdgeInsets.zero,
-                      child: Column(
-                        children: [
-                          for (var i = 0; i < state.data.queued.length; i++) ...[
-                            if (i > 0) const Divider(),
-                            _QueuedTile(item: state.data.queued[i]),
-                          ],
-                        ],
-                      ),
-                    ),
-                    const SizedBox(height: AppSpacing.md),
-                  ],
-                  if (state.data.requests.isEmpty && state.data.queued.isEmpty)
-                    const AppCard(
-                      child: EmptyState(
-                        message: 'You have not applied for leave yet.',
-                        icon: Icons.beach_access_outlined,
-                      ),
-                    )
-                  else if (state.data.requests.isNotEmpty)
-                    AppCard(
-                      padding: EdgeInsets.zero,
-                      child: Column(
-                        children: [
-                          for (var i = 0; i < state.data.requests.length; i++) ...[
-                            if (i > 0) const Divider(),
-                            _RequestTile(request: state.data.requests[i]),
-                          ],
-                        ],
-                      ),
-                    ),
+                  FilledButton(
+                    onPressed: !state.data.hasData
+                        ? null
+                        : () =>
+                              Navigator.of(context)
+                                  .push(MaterialPageRoute<void>(builder: (_) => const LeaveFormScreen())),
+                    style: FilledButton.styleFrom(minimumSize: const Size(120, 44)),
+                    child: const Text('Apply'),
+                  ),
                 ],
               ),
             ),
+            const SizedBox(height: AppSpacing.lg),
+            const SectionTitle('Requests'),
+            if (state.data.queued.isNotEmpty) ...[
+              AppCard(
+                padding: EdgeInsets.zero,
+                child: Column(
+                  children: [
+                    for (var i = 0; i < state.data.queued.length; i++) ...[
+                      if (i > 0) const Divider(),
+                      _QueuedTile(item: state.data.queued[i]),
+                    ],
+                  ],
+                ),
+              ),
+              const SizedBox(height: AppSpacing.md),
+            ],
+            if (state.data.requests.isEmpty && state.data.queued.isEmpty)
+              const AppCard(
+                child: EmptyState(message: 'You have not applied for leave yet.', icon: Icons.beach_access_outlined),
+              )
+            else if (state.data.requests.isNotEmpty)
+              AppCard(
+                padding: EdgeInsets.zero,
+                child: Column(
+                  children: [
+                    for (var i = 0; i < state.data.requests.length; i++) ...[
+                      if (i > 0) const Divider(),
+                      _RequestTile(request: state.data.requests[i]),
+                    ],
+                  ],
+                ),
+              ),
+          ],
+        ),
+      ),
     );
   }
 }

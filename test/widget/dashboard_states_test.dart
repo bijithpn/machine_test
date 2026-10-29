@@ -103,8 +103,8 @@ void main() {
     expect(tester.takeException(), isNull, reason: 'elapsed timer is cancelled on dispose');
   });
 
-  testWidgets('first launch with no cache and no network shows an offline error with retry', (tester) async {
-    final fake = await pump(
+  testWidgets('first launch with no cache and no network still loads the app and syncs later', (tester) async {
+    await pump(
       tester,
       const DashboardState(
         refreshing: false,
@@ -114,9 +114,10 @@ void main() {
       ),
       online: false,
     );
-    expect(find.text('You are offline'), findsOneWidget);
-    await tester.tap(find.text('Retry'));
-    expect(fake.refreshCalls, 1);
+    expect(find.text('You are offline'), findsNothing);
+    expect(find.textContaining('sync automatically'), findsOneWidget);
+    expect(find.text('Check in'), findsOneWidget);
+    expect(find.text('Welcome'), findsOneWidget);
   });
 
   testWidgets('empty history and not-checked-in state', (tester) async {
