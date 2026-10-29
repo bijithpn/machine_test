@@ -6,8 +6,9 @@ import '../../../domain/models.dart';
 import '../../dashboard/presentation/dashboard_cubit.dart';
 
 class ActionState {
-  const ActionState({this.busy = false, this.error, this.locationFailure});
+  const ActionState({this.busy = false, this.error, this.locationFailure, this.done});
   final bool busy;
+  final AttendanceType? done;
   final String? error;
   final LocationFailure? locationFailure;
 }
@@ -22,7 +23,7 @@ class AttendanceActionCubit extends Cubit<ActionState> {
     emit(const ActionState(busy: true));
     try {
       await _service.record(type);
-      emit(const ActionState());
+      emit(ActionState(done: type));
     } on LocationException catch (e) {
       emit(ActionState(error: e.message, locationFailure: e.failure));
     } on OutsideOfficeException catch (e) {

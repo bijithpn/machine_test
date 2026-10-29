@@ -40,7 +40,6 @@ class LeaveCubit extends Cubit<LeaveState> {
     }
   }
 
-  /// Throws [LeaveValidationException], [OfflineException] or [ApiException] for the form to show.
   Future<void> submit(LeaveDraft draft) async {
     await _repo.submit(draft);
     final cached = await _repo.cached();

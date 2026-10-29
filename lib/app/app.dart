@@ -33,7 +33,6 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    // Picks up events whose backoff has elapsed while the app stays open.
     _retryTimer = Timer.periodic(const Duration(seconds: 20), (_) => context.read<DashboardCubit>().backgroundSync());
   }
 

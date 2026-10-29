@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 
 import '../../../core/time/company_clock.dart';
+import '../../../core/design/feedback.dart';
 import '../../../core/design/formatters.dart';
 import '../../../core/design/tokens.dart';
 import '../../../core/design/widgets.dart';
@@ -71,13 +72,20 @@ class _LeaveFormScreenState extends State<LeaveFormScreen> {
     });
     final errors = _localErrors();
     if (errors.isNotEmpty) return;
+    final ok = await confirmDialog(
+      context,
+      title: 'Submit leave request?',
+      message: 'This sends your request for approval and needs a connection.',
+      confirmLabel: 'Submit',
+    );
+    if (!ok || !mounted) return;
 
     setState(() => _submitting = true);
     try {
       await context.read<LeaveCubit>().submit(_draft);
       _saved.reset();
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Leave request submitted')));
+      showToast(context, 'Leave request submitted', kind: ToastKind.success);
       Navigator.of(context).pop();
     } on LeaveValidationException catch (e) {
       const known = {'type', 'startDate', 'endDate', 'reason'};
@@ -91,8 +99,10 @@ class _LeaveFormScreenState extends State<LeaveFormScreen> {
       });
     } on OfflineException catch (e) {
       setState(() => _formError = e.message);
+      errorDialog(context, title: 'You are offline', message: e.message);
     } on ApiException catch (e) {
       setState(() => _formError = e.message);
+      showToast(context, e.message, kind: ToastKind.error);
     } finally {
       if (mounted) setState(() => _submitting = false);
     }

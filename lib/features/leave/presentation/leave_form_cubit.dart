@@ -3,7 +3,6 @@ import 'package:hydrated_bloc/hydrated_bloc.dart';
 import '../../../core/time/company_clock.dart';
 import '../../../domain/models.dart';
 
-/// Keeps the unsent leave draft across screen exits and app restarts.
 class LeaveFormCubit extends HydratedCubit<LeaveDraft> {
   LeaveFormCubit() : super(const LeaveDraft(type: LeaveType.casual, reason: ''));
 

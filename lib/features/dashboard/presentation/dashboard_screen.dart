@@ -3,6 +3,7 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:geolocator/geolocator.dart';
 
 import '../../../core/time/company_clock.dart';
+import '../../../core/design/feedback.dart';
 import '../../../core/design/formatters.dart';
 import '../../../core/design/tokens.dart';
 import '../../../core/design/widgets.dart';
@@ -151,61 +152,97 @@ class _TodayCard extends StatelessWidget {
       AttendanceStatus.notCheckedIn => Text('--', style: theme.textTheme.titleLarge),
     };
 
-    return AppCard(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Expanded(child: Text('Today', style: theme.textTheme.titleMedium)),
-              if (today != null && today.sync != SyncStatus.synced) ...[
-                StatusChip(syncLabel(today.sync), syncColor(today.sync)),
-                const SizedBox(width: AppSpacing.sm),
+    return BlocListener<AttendanceActionCubit, ActionState>(
+      listenWhen: (_, s) => s.done != null || s.error != null,
+      listener: _onActionResult,
+      child: AppCard(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Expanded(child: Text('Today', style: theme.textTheme.titleMedium)),
+                if (today != null && today.sync != SyncStatus.synced) ...[
+                  StatusChip(syncLabel(today.sync), syncColor(today.sync)),
+                  const SizedBox(width: AppSpacing.sm),
+                ],
+                StatusChip(attendanceLabel(status), switch (status) {
+                  AttendanceStatus.notCheckedIn => AppColors.textMuted,
+                  AttendanceStatus.checkedIn => AppColors.accent,
+                  AttendanceStatus.checkedOut => AppColors.success,
+                }),
               ],
-              StatusChip(attendanceLabel(status), switch (status) {
-                AttendanceStatus.notCheckedIn => AppColors.textMuted,
-                AttendanceStatus.checkedIn => AppColors.accent,
-                AttendanceStatus.checkedOut => AppColors.success,
-              }),
-            ],
-          ),
-          const SizedBox(height: AppSpacing.md),
-          Row(
-            children: [
-              _Metric(label: 'Check-in', value: time(today?.checkIn)),
-              _Metric(label: 'Check-out', value: time(today?.checkOut)),
-            ],
-          ),
-          const SizedBox(height: AppSpacing.md),
-          Text(status == AttendanceStatus.checkedOut ? 'TOTAL WORKED' : 'ELAPSED', style: theme.textTheme.labelMedium),
-          const SizedBox(height: 2),
-          duration,
-          const SizedBox(height: AppSpacing.md),
-          if (status != AttendanceStatus.checkedOut)
-            FilledButton(
-              onPressed: action.busy
-                  ? null
-                  : () => context.read<AttendanceActionCubit>().submit(
-                      status == AttendanceStatus.notCheckedIn ? AttendanceType.checkIn : AttendanceType.checkOut,
-                    ),
-              child: action.busy
-                  ? const SizedBox(
-                      height: 20,
-                      width: 20,
-                      child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
-                    )
-                  : Text(status == AttendanceStatus.notCheckedIn ? 'Check in' : 'Check out'),
             ),
-          if (action.error != null) ...[
-            const SizedBox(height: AppSpacing.sm),
-            Text(action.error!, style: theme.textTheme.bodyMedium?.copyWith(color: AppColors.danger)),
-            if (action.locationFailure == LocationFailure.deniedForever)
-              TextButton(onPressed: Geolocator.openAppSettings, child: const Text('Open app settings')),
-            if (action.locationFailure == LocationFailure.servicesDisabled)
-              TextButton(onPressed: Geolocator.openLocationSettings, child: const Text('Open location settings')),
+            const SizedBox(height: AppSpacing.md),
+            Row(
+              children: [
+                _Metric(label: 'Check-in', value: time(today?.checkIn)),
+                _Metric(label: 'Check-out', value: time(today?.checkOut)),
+              ],
+            ),
+            const SizedBox(height: AppSpacing.md),
+            Text(
+              status == AttendanceStatus.checkedOut ? 'TOTAL WORKED' : 'ELAPSED',
+              style: theme.textTheme.labelMedium,
+            ),
+            const SizedBox(height: 2),
+            duration,
+            const SizedBox(height: AppSpacing.md),
+            if (status != AttendanceStatus.checkedOut)
+              FilledButton(
+                onPressed: action.busy
+                    ? null
+                    : () => _confirm(
+                        context,
+                        status == AttendanceStatus.notCheckedIn ? AttendanceType.checkIn : AttendanceType.checkOut,
+                      ),
+                child: action.busy
+                    ? const SizedBox(
+                        height: 20,
+                        width: 20,
+                        child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                      )
+                    : Text(status == AttendanceStatus.notCheckedIn ? 'Check in' : 'Check out'),
+              ),
           ],
-        ],
+        ),
       ),
+    );
+  }
+}
+
+Future<void> _confirm(BuildContext context, AttendanceType type) async {
+  final cubit = context.read<AttendanceActionCubit>();
+  final checkIn = type == AttendanceType.checkIn;
+  final ok = await confirmDialog(
+    context,
+    title: checkIn ? 'Check in?' : 'Check out?',
+    message:
+        'Your location will be verified against the office before the ${checkIn ? 'check-in' : 'check-out'} is saved.',
+    confirmLabel: checkIn ? 'Check in' : 'Check out',
+  );
+  if (ok) cubit.submit(type);
+}
+
+void _onActionResult(BuildContext context, ActionState s) {
+  if (s.done != null) {
+    showToast(
+      context,
+      s.done == AttendanceType.checkIn ? 'Checked in. Saved on this device.' : 'Checked out. Saved on this device.',
+      kind: ToastKind.success,
+    );
+  } else if (s.error != null) {
+    final (label, open) = switch (s.locationFailure) {
+      LocationFailure.deniedForever => ('Open app settings', Geolocator.openAppSettings),
+      LocationFailure.servicesDisabled => ('Open location settings', Geolocator.openLocationSettings),
+      _ => (null, null),
+    };
+    errorDialog(
+      context,
+      title: 'Attendance not saved',
+      message: s.error!,
+      actionLabel: label,
+      onAction: open == null ? null : () => open(),
     );
   }
 }

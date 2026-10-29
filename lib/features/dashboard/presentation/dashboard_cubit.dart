@@ -36,7 +36,6 @@ class DashboardCubit extends Cubit<DashboardState> {
     await refresh();
   }
 
-  /// Pushes pending events, then pulls server data; local state survives any failure.
   Future<void> refresh({bool manualSync = false}) async {
     _refreshes++;
     emit(DashboardState(data: state.data, refreshing: true));

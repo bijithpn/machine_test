@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 
 import '../../../core/time/company_clock.dart';
+import '../../../core/design/feedback.dart';
 import '../../../core/design/formatters.dart';
 import '../../../core/design/tokens.dart';
 import '../../../core/design/widgets.dart';
@@ -112,17 +113,15 @@ class _SyncSummary extends StatelessWidget {
   }
 
   Future<void> _syncNow(BuildContext context) async {
-    final messenger = ScaffoldMessenger.of(context);
     final report = await context.read<DashboardCubit>().syncNow();
     final c = report.counts;
-    messenger.showSnackBar(
-      SnackBar(
-        content: Text(
-          report.blockedByFailure
-              ? 'Could not reach the server. ${c.pending} still pending; they are safe on this device.'
-              : 'Sync finished: ${c.synced} synced, ${c.pending} pending, ${c.rejected} rejected.',
-        ),
-      ),
+    if (!context.mounted) return;
+    showToast(
+      context,
+      report.blockedByFailure
+          ? 'Could not reach the server. ${c.pending} still pending; they are safe on this device.'
+          : 'Sync finished: ${c.synced} synced, ${c.pending} pending, ${c.rejected} rejected.',
+      kind: report.blockedByFailure ? ToastKind.error : ToastKind.success,
     );
   }
 }

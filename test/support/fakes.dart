@@ -73,7 +73,6 @@ ResponseBody jsonBody(int status, Object body) => ResponseBody.fromString(
 DioException timeoutFor(RequestOptions o) =>
     DioException.receiveTimeout(timeout: const Duration(seconds: 6), requestOptions: o);
 
-/// Minimal stand-in for the mock server's attendance event semantics.
 class FakeEventServer {
   final processed = <String, ({int code, Map<String, dynamic> body})>{};
   final order = <String>[];
